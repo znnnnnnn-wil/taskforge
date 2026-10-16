@@ -1,0 +1,7 @@
+*
+!target/
+target/*
+!target/taskforge-1.0.0.jar
+!scripts/
+scripts/*
+!scripts/healthcheck.sh

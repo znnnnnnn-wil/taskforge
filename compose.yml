@@ -1,0 +1,61 @@
+name: taskforge
+x-taskforge: &taskforge
+  image: taskforge:local
+  pull_policy: never
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+  environment: &environment
+    BIND_ADDRESS: 0.0.0.0
+    DB_URL: jdbc:postgresql://db:5432/taskforge
+    DB_USER: taskforge
+    DB_PASSWORD: ${DB_PASSWORD:?Run python scripts/setup.py first}
+    TASKFORGE_API_KEY: ${TASKFORGE_API_KEY:?Run python scripts/setup.py first}
+    WORKER_CONCURRENCY: 2
+    LEASE_SECONDS: 15
+  healthcheck:
+    test: ["CMD", "bash", "/app/healthcheck.sh"]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 30s
+  stop_grace_period: 30s
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: taskforge
+      POSTGRES_USER: taskforge
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Run python scripts/setup.py first}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taskforge -d taskforge"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  api:
+    <<: *taskforge
+    build: .
+    environment:
+      <<: *environment
+      NODE_ID: api
+      WORKER_ENABLED: "false"
+    ports:
+      - "127.0.0.1:${TASKFORGE_PORT:-18080}:8080"
+  worker-a:
+    <<: *taskforge
+    environment:
+      <<: *environment
+      NODE_ID: worker-a
+      WORKER_ENABLED: "true"
+  worker-b:
+    <<: *taskforge
+    environment:
+      <<: *environment
+      NODE_ID: worker-b
+      WORKER_ENABLED: "true"
+volumes:
+  postgres-data:
