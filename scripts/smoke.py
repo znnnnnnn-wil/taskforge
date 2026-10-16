@@ -22,6 +22,13 @@ try:
 except urllib.error.HTTPError as error:
     assert error.code == 401
 results["authentication"] = "passed"
+for path in ("/api;route=1/tasks", "//api/tasks", "/actuator/prometheus;route=1"):
+    try:
+        urllib.request.urlopen(BASE + path, timeout=10)
+        raise AssertionError(f"URL variant bypassed authentication: {path}")
+    except urllib.error.HTTPError as error:
+        assert error.code in {400, 401}
+results["authentication_url_variants"] = "passed"
 
 request = submission(prefix + "-echo", payload={"message": "hello"})
 task = call("POST", "/api/tasks", request)

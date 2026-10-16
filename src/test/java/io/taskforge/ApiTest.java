@@ -97,4 +97,11 @@ class ApiTest {
         http.perform(get("/actuator/prometheus").header("X-API-Key", KEY))
                 .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("taskforge_worker_capacity")));
     }
+
+    @Test
+    void alternateUrlFormsCannotBypassAuthentication() throws Exception {
+        http.perform(get("/api;route=1/tasks")).andExpect(status().isUnauthorized());
+        http.perform(get("/api/tasks/")).andExpect(status().isUnauthorized());
+        http.perform(get("/actuator/prometheus;route=1")).andExpect(status().isUnauthorized());
+    }
 }
