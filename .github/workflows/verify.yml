@@ -1,0 +1,49 @@
+name: verify
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Enforce 500 changed lines per PR
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/check_pr_size.py "$PR_BASE" "$PR_HEAD"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - run: mvn -B verify
+      - name: Compile verification scripts
+        run: python3 -m compileall -q scripts
+      - name: Compile Java client example
+        run: |
+          if [ -f examples/TaskForgeClient.java ]; then
+            javac -d target/client examples/TaskForgeClient.java
+          fi
+      - name: Compose end-to-end acceptance
+        if: hashFiles('compose.yml') != ''
+        run: |
+          python3 scripts/setup.py
+          docker compose up -d --build --wait
+          python3 scripts/smoke.py --chaos
+      - name: Container diagnostics
+        if: failure() && hashFiles('compose.yml') != ''
+        run: docker compose logs --tail 100
+      - name: Stop test services
+        if: always() && hashFiles('compose.yml') != ''
+        run: docker compose down
