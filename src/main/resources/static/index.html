@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TaskForge · 任务控制台</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<header><div><span class="eyebrow">DISTRIBUTED EXECUTION</span><h1>TaskForge<span>任务控制台</span></h1></div>
+  <form id="connect"><label>访问密钥<input id="key" type="password" autocomplete="off" placeholder="输入 API Key" required></label>
+    <button>连接</button></form></header>
+<main>
+  <div id="notice" role="status" aria-live="polite">输入访问密钥，连接任务平台。密钥仅保存在当前页面内存中。</div>
+  <section class="metrics" aria-label="任务统计">
+    <article><span>等待执行</span><strong id="pending">—</strong></article>
+    <article><span>正在执行</span><strong id="running">—</strong></article>
+    <article><span>执行成功</span><strong id="succeeded">—</strong></article>
+    <article><span>执行失败</span><strong id="failed">—</strong></article>
+  </section>
+  <div class="layout">
+    <section class="panel"><div class="heading"><h2>创建任务</h2><span class="muted">立即执行 / 定时执行</span></div>
+      <form id="submit-task" class="stack">
+        <label>处理器<select id="handler"><option>echo</option><option>sha256</option><option>report</option><option>delay</option></select></label>
+        <label>任务参数 · JSON<textarea id="payload" rows="5" spellcheck="false">{"message":"Hello, TaskForge"}</textarea></label>
+        <div class="pair"><label>优先级<select id="priority"><option value="0">0 · 普通</option><option value="5">5 · 较高</option><option value="9">9 · 最高</option></select></label>
+          <label>最多执行次数<input id="max-attempts" type="number" min="1" max="20" value="3" required></label></div>
+        <div class="pair"><label>重试间隔 / 秒<input id="retry-delay" type="number" min="1" max="3600" value="2" required></label>
+          <label>单次超时 / 秒<input id="timeout" type="number" min="1" max="86400" value="60" required></label></div>
+        <label>计划时间 · 留空立即执行<input id="available" type="datetime-local" step="1"></label>
+        <label>幂等请求标识<input id="request-key" maxlength="120" required></label>
+        <button class="primary">提交任务</button>
+        <p class="muted">提交失败时保留请求标识，重试可避免重复创建。终态任务不会再次执行。</p>
+      </form>
+    </section>
+    <section class="panel"><div class="heading"><h2>任务列表</h2><div class="actions">
+      <select id="status" aria-label="筛选任务状态"><option value="">全部状态</option><option>PENDING</option><option>RUNNING</option><option>RETRY</option><option>SUCCEEDED</option><option>FAILED</option><option>CANCELLED</option></select>
+      <button id="refresh" type="button">刷新</button></div></div>
+      <div class="table-wrap"><table><thead><tr><th>任务</th><th>状态</th><th>进度</th><th>执行次数</th><th>创建时间</th></tr></thead><tbody id="tasks"></tbody></table></div>
+      <div class="pagination"><span id="node" class="muted">尚未连接</span><div class="actions"><button id="previous" type="button">上一页</button><span id="page">1</span><button id="next" type="button">下一页</button></div></div>
+      <details id="detail-panel"><summary>任务详情与执行记录</summary><div class="actions"><strong id="selected-id"></strong><button id="cancel" type="button">取消任务</button></div><pre id="detail">选择一条任务查看详情。</pre></details>
+    </section>
+  </div>
+  <section class="panel"><div class="heading"><h2>周期调度</h2><span class="muted">按时区计算；暂停后已生成的任务继续执行</span></div>
+    <form id="submit-schedule" class="schedule-form">
+      <label>名称<input id="schedule-name" maxlength="100" placeholder="每分钟统计" required></label>
+      <label>Cron · 秒 分 时 日 月 周<input id="cron" value="0 * * * * *" required></label>
+      <label>时区<input id="zone" value="Asia/Shanghai" required></label>
+      <button>使用上方参数创建调度</button>
+    </form>
+    <div class="table-wrap"><table><thead><tr><th>名称</th><th>Cron / 时区</th><th>下次触发</th><th>状态</th><th>操作</th></tr></thead><tbody id="schedules"></tbody></table></div>
+  </section>
+  <section class="panel node-panel"><div class="heading"><h2>集群节点</h2><span class="muted">10 秒内收到心跳视为在线</span></div>
+    <div class="table-wrap"><table><thead><tr><th>节点</th><th>角色</th><th>活跃 / 容量</th><th>最后心跳</th><th>状态</th></tr></thead><tbody id="nodes"></tbody></table></div>
+  </section>
+  <footer>至少执行一次 · 业务副作用需实现幂等 <span>TaskForge 1.0</span></footer>
+</main>
+</body>
+</html>
