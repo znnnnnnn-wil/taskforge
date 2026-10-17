@@ -27,7 +27,7 @@ public class WorkerEngine {
     private final ObjectMapper json;
     private final MeterRegistry metrics;
     private final ThreadPoolExecutor pool;
-    private final Map<String, Active> running = new ConcurrentHashMap<>();
+    private final Map<Execution, Active> running = new ConcurrentHashMap<>();
     private volatile boolean closing;
 
     public WorkerEngine(TaskStore store, TaskLifecycle lifecycle, HandlerRegistry handlers,
@@ -65,13 +65,13 @@ public class WorkerEngine {
             @Override public void run() {
                 try { super.run(); }
                 finally {
-                    running.remove(task.id(), active);
+                    running.remove(active.execution, active);
                     try { poll(); }
                     catch (RuntimeException unavailable) { log.warn("任务完成后补充领取失败，等待定时轮询恢复"); }
                 }
             }
         };
-        running.put(task.id(), active);
+        running.put(active.execution, active);
         try {
             pool.execute(active.future);
             metrics.counter("taskforge.task.claimed").increment();
@@ -80,7 +80,7 @@ public class WorkerEngine {
                             ? java.time.Duration.ZERO
                             : java.time.Duration.between(task.availableAt(), task.updatedAt()));
         } catch (java.util.concurrent.RejectedExecutionException rejected) {
-            running.remove(task.id(), active);
+            running.remove(active.execution, active);
             lifecycle.finish(task, null, "执行器正在关闭");
         }
     }
@@ -139,7 +139,7 @@ public class WorkerEngine {
 
     private void stop(Active active) {
         active.future.cancel(true);
-        if (pool.remove(active.future)) running.remove(active.task.id(), active);
+        if (pool.remove(active.future)) running.remove(active.execution, active);
     }
 
     public int activeCount() { return running.size(); }
@@ -153,12 +153,18 @@ public class WorkerEngine {
         catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
     }
 
+    private record Execution(String taskId, long token) { }
+
     private static final class Active {
         final Task task;
+        final Execution execution;
         final long startedNanos = System.nanoTime();
         final AtomicInteger progress = new AtomicInteger();
         final AtomicBoolean settled = new AtomicBoolean();
         FutureTask<Void> future;
-        Active(Task task) { this.task = task; }
+        Active(Task task) {
+            this.task = task;
+            this.execution = new Execution(task.id(), task.token());
+        }
     }
 }
