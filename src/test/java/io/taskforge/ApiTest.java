@@ -82,6 +82,10 @@ class ApiTest {
         var created = http.perform(post("/api/schedules").header("X-API-Key", KEY)
                 .contentType(MediaType.APPLICATION_JSON).content(request)).andExpect(status().isCreated()).andReturn();
         String id = json.readTree(created.getResponse().getContentAsByteArray()).path("id").asText();
+        String nextRun = json.readTree(created.getResponse().getContentAsByteArray()).path("nextRun").asText();
+        http.perform(put("/api/schedules/" + id + "/enabled").header("X-API-Key", KEY)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":true}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.nextRun").value(nextRun));
         http.perform(put("/api/schedules/" + id + "/enabled").header("X-API-Key", KEY)
                 .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.enabled").value(false));
