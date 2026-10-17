@@ -65,9 +65,17 @@ public class ScheduleStore {
 
     public TaskSchedule enable(String id, boolean enabled) {
         return tx.execute(status -> {
-            TaskSchedule schedule = require(id);
-            tasks.jdbc().update("UPDATE forge_schedule SET enabled = ?, next_run = ? WHERE id = ?",
-                    enabled, timestamp(next(schedule.cron(), schedule.zone(), tasks.now())), id);
+            List<TaskSchedule> found = tasks.jdbc().query(
+                    "SELECT * FROM forge_schedule WHERE id = ? FOR UPDATE", this::map, id);
+            if (found.isEmpty()) throw new ForgeException(404, "周期任务不存在");
+            TaskSchedule schedule = found.get(0);
+            if (schedule.enabled() == enabled) return schedule;
+            if (enabled) {
+                tasks.jdbc().update("UPDATE forge_schedule SET enabled = TRUE, next_run = ? WHERE id = ?",
+                        timestamp(next(schedule.cron(), schedule.zone(), tasks.now())), id);
+            } else {
+                tasks.jdbc().update("UPDATE forge_schedule SET enabled = FALSE WHERE id = ?", id);
+            }
             return require(id);
         });
     }

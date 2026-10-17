@@ -38,4 +38,37 @@ class ScheduleTest {
         assertThatThrownBy(() -> ScheduleStore.next("invalid", "UTC", Instant.now())).isInstanceOf(ForgeException.class);
         assertThatThrownBy(() -> ScheduleStore.next("* * * * * *", "missing", Instant.now())).isInstanceOf(ForgeException.class);
     }
+
+    @Test
+    void repeatingEnablePreservesDueRun() {
+        TaskSchedule schedule = schedules.create(new ScheduleRequest("幂等启用", "*/5 * * * * *", "UTC",
+                new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
+        tasks.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+                TaskStore.timestamp(tasks.now().minusSeconds(60)), schedule.id());
+        TaskSchedule due = schedules.require(schedule.id());
+        assertThat(schedules.enable(schedule.id(), true).nextRun()).isEqualTo(due.nextRun());
+        assertThat(schedules.enable(schedule.id(), true).nextRun()).isEqualTo(due.nextRun());
+        assertThat(schedules.fire(due)).isTrue();
+        assertThat(schedules.fire(due)).isFalse();
+        assertThat(schedules.instances(schedule.id(), 10, 0)).hasSize(1);
+        schedules.enable(schedule.id(), false);
+    }
+
+    @Test
+    void pausePreservesPlanAndResumeSkipsPausedIntervalsOnce() {
+        TaskSchedule schedule = schedules.create(new ScheduleRequest("暂停与恢复", "*/5 * * * * *", "UTC",
+                new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
+        tasks.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+                TaskStore.timestamp(tasks.now().minusSeconds(60)), schedule.id());
+        TaskSchedule due = schedules.require(schedule.id());
+        assertThat(schedules.enable(schedule.id(), false).nextRun()).isEqualTo(due.nextRun());
+        assertThat(schedules.enable(schedule.id(), false).nextRun()).isEqualTo(due.nextRun());
+        assertThat(schedules.fire(due)).isFalse();
+        Instant before = tasks.now();
+        TaskSchedule resumed = schedules.enable(schedule.id(), true);
+        assertThat(resumed.nextRun()).isAfter(before);
+        assertThat(schedules.enable(schedule.id(), true).nextRun()).isEqualTo(resumed.nextRun());
+        assertThat(schedules.instances(schedule.id(), 10, 0)).isEmpty();
+        schedules.enable(schedule.id(), false);
+    }
 }

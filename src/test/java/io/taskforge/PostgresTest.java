@@ -51,6 +51,30 @@ class PostgresTest {
     }
 
     @Test
+    void concurrentEnableAndFirePreserveOneDueInstance() throws Exception {
+        TaskSchedule schedule = schedules.create(new ScheduleRequest("PG enable race", "*/5 * * * * *", "UTC",
+                new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
+        store.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+                TaskStore.timestamp(store.now().minusSeconds(60)), schedule.id());
+        TaskSchedule due = schedules.require(schedule.id());
+        var pool = Executors.newFixedThreadPool(8);
+        try {
+            var calls = new ArrayList<Callable<Boolean>>();
+            for (int i = 0; i < 12; i++) {
+                calls.add(() -> { schedules.enable(schedule.id(), true); return false; });
+                calls.add(() -> schedules.fire(due));
+            }
+            int winners = 0;
+            for (var result : pool.invokeAll(calls)) if (result.get()) winners++;
+            assertThat(winners).isEqualTo(1);
+            assertThat(schedules.instances(schedule.id(), 10, 0)).hasSize(1);
+        } finally {
+            pool.shutdownNow();
+            schedules.enable(schedule.id(), false);
+        }
+    }
+
+    @Test
     void concurrentIdempotentSubmissionAndClaimOnRealDatabase() throws Exception {
         Submission request = new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 3, 1, 60, null);
         var pool = Executors.newFixedThreadPool(8);
