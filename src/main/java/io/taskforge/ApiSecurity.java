@@ -40,7 +40,9 @@ public class ApiSecurity extends OncePerRequestFilter {
         response.setHeader("X-Frame-Options", "DENY");
         response.setHeader("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
         String path = request.getRequestURI().substring(request.getContextPath().length());
-        if (!path.startsWith("/api/") && !path.equals("/actuator/prometheus")) {
+        // Only exact static assets and health are public. Raw URL variants must never bypass authentication.
+        if (java.util.Set.of("/", "/index.html", "/app.css", "/app.js", "/favicon.ico", "/actuator/health")
+                .contains(path)) {
             chain.doFilter(request, response);
             return;
         }
