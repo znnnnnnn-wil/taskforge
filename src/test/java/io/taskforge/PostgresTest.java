@@ -8,6 +8,8 @@ import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -35,6 +37,18 @@ class PostgresTest {
     @Autowired TaskLifecycle lifecycle;
     @Autowired ScheduleStore schedules;
     @Autowired ObjectMapper json;
+    @Autowired org.springframework.transaction.support.TransactionTemplate tx;
+
+    @ParameterizedTest
+    @EnumSource(LeaseContentionTest.Operation.class)
+    void leaseTimeIsFreshAfterRowLockWait(LeaseContentionTest.Operation operation) throws Exception {
+        LeaseContentionTest.checkLockWait(store, lifecycle, json, operation);
+    }
+
+    @Test
+    void databaseClockAdvancesInsideTransaction() {
+        LeaseContentionTest.checkClock(store, tx);
+    }
 
     @Test
     void concurrentIdempotentSubmissionAndClaimOnRealDatabase() throws Exception {

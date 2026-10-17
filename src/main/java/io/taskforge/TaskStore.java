@@ -11,16 +11,30 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.stereotype.Repository;
 
 @Repository
 public class TaskStore {
     final JdbcTemplate jdbc;
     private final ObjectMapper json;
+    private final boolean embeddedH2;
 
     public TaskStore(JdbcTemplate jdbc, ObjectMapper json) {
         this.jdbc = jdbc;
         this.json = json;
+        this.embeddedH2 = Boolean.TRUE.equals(jdbc.execute((ConnectionCallback<Boolean>) connection -> {
+            String database = connection.getMetaData().getDatabaseProductName();
+            if (database.equals("H2")) {
+                String url = connection.getMetaData().getURL();
+                if (url.startsWith("jdbc:h2:tcp:") || url.startsWith("jdbc:h2:ssl:")) {
+                    throw new IllegalArgumentException("H2 仅支持嵌入式开发；多节点请使用 PostgreSQL");
+                }
+                return true;
+            }
+            if (!database.equals("PostgreSQL")) throw new IllegalArgumentException("仅支持 H2 和 PostgreSQL");
+            return false;
+        }));
     }
 
     public JdbcTemplate jdbc() { return jdbc; }
@@ -59,6 +73,10 @@ public class TaskStore {
             throw new ForgeException(404, "任务不存在");
         }
         return tasks.get(0);
+    }
+
+    java.util.Optional<Task> lock(String id) {
+        return jdbc.query("SELECT * FROM forge_task WHERE id = ? FOR UPDATE", this::map, id).stream().findFirst();
     }
 
     private Task byRequestKey(String key) {
@@ -110,7 +128,9 @@ public class TaskStore {
     }
 
     Instant now() {
-        return jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", Timestamp.class).toInstant();
+        // Embedded H2 shares this JVM's clock. PostgreSQL CURRENT_TIMESTAMP is frozen at transaction start.
+        return embeddedH2 ? Instant.now()
+                : jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class).toInstant();
     }
 
     List<Task> due(int limit) {

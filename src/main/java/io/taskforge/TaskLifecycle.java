@@ -22,6 +22,7 @@ public class TaskLifecycle {
 
     public Optional<Task> claim(String id, long expectedToken, String node) {
         return tx.execute(status -> {
+            if (store.lock(id).isEmpty()) return Optional.empty();
             Instant now = store.now();
             int changed = store.jdbc().update("""
                     UPDATE forge_task SET status = 'RUNNING', attempts = attempts + 1,
@@ -47,16 +48,20 @@ public class TaskLifecycle {
         if (progress < 0 || progress > 99) {
             throw new IllegalArgumentException("运行中进度必须为 0..99");
         }
-        Instant now = store.now();
-        return store.jdbc().update("""
+        return Boolean.TRUE.equals(tx.execute(status -> {
+            if (store.lock(task.id()).isEmpty()) return false;
+            Instant now = store.now();
+            return store.jdbc().update("""
                 UPDATE forge_task SET lease_until = ?, progress = ?, updated_at = ?
                 WHERE id = ? AND status = 'RUNNING' AND owner = ? AND token = ? AND lease_until > ?
                 """, timestamp(now.plusSeconds(config.leaseSeconds())), progress, timestamp(now),
                 task.id(), task.owner(), task.token(), timestamp(now)) == 1;
+        }));
     }
 
     public boolean finish(Task task, String result, String error) {
         return Boolean.TRUE.equals(tx.execute(status -> {
+            if (store.lock(task.id()).isEmpty()) return false;
             Instant now = store.now();
             boolean success = error == null;
             String next = success ? "SUCCEEDED" : task.attempts() < task.maxAttempts() ? "RETRY" : "FAILED";
@@ -79,12 +84,7 @@ public class TaskLifecycle {
     public Task cancel(String id) {
         return tx.execute(status -> {
             // Lock the row so attempt finalization cannot race cancellation bookkeeping.
-            List<Task> tasks = store.jdbc().query("SELECT * FROM forge_task WHERE id = ? FOR UPDATE",
-                    store::map, id);
-            if (tasks.isEmpty()) {
-                throw new ForgeException(404, "任务不存在");
-            }
-            Task current = tasks.get(0);
+            Task current = store.lock(id).orElseThrow(() -> new ForgeException(404, "任务不存在"));
             if (!current.terminal()) {
                 Instant now = store.now();
                 store.jdbc().update("""
@@ -107,6 +107,7 @@ public class TaskLifecycle {
         int recovered = 0;
         for (Task task : expired) {
             Boolean changed = tx.execute(status -> {
+                if (store.lock(task.id()).isEmpty()) return false;
                 Instant now = store.now();
                 String next = task.attempts() < task.maxAttempts() ? "RETRY" : "FAILED";
                 int count = store.jdbc().update("""
