@@ -1,11 +1,13 @@
 package io.taskforge.persistence;
 
 import com.mybatisflex.core.BaseMapper;
+import com.mybatisflex.annotation.UseDataSource;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
+@UseDataSource("taskforge")
 public interface NodeMapper extends BaseMapper<NodeRow> {
     @Update("""
             UPDATE forge_node SET worker_enabled = #{enabled}, capacity = #{capacity},
