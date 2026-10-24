@@ -6,6 +6,10 @@ import io.taskforge.persistence.TaskMapper;
 import io.taskforge.persistence.TaskRow;
 import java.time.Instant;
 import java.util.UUID;
+import javax.sql.DataSource;
+import org.apache.ibatis.session.LocalCacheScope;
+import org.apache.ibatis.session.SqlSessionFactory;
+import org.mybatis.spring.transaction.SpringManagedTransactionFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,6 +23,21 @@ class MapperPersistenceTest {
     @Autowired TaskMapper mapper;
     @Autowired JdbcTemplate jdbc;
     @Autowired TransactionTemplate tx;
+    @Autowired DataSource source;
+    @Autowired SqlSessionFactory sessions;
+
+    @Test
+    void mapperAndSpringShareTransactionResourcesWithoutSessionCache() {
+        var configuration = sessions.getConfiguration();
+        assertThat(configuration.getEnvironment().getDataSource()).isSameAs(source);
+        assertThat(configuration.getEnvironment().getTransactionFactory())
+                .isInstanceOf(SpringManagedTransactionFactory.class);
+        assertThat(configuration.getLocalCacheScope()).isEqualTo(LocalCacheScope.STATEMENT);
+        assertThat(configuration.isCacheEnabled()).isFalse();
+        var manager = (org.springframework.jdbc.datasource.DataSourceTransactionManager) tx.getTransactionManager();
+        assertThat(manager.getDataSource()).isSameAs(source);
+        assertThat(manager.isNestedTransactionAllowed()).isTrue();
+    }
 
     @Test
     void selectiveInsertPreservesDefaultsAndTimestampPrecision() {

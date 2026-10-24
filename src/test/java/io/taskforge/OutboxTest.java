@@ -13,6 +13,7 @@ import java.util.concurrent.Executors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -21,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         "spring.datasource.url=jdbc:h2:mem:outbox;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
         "taskforge.worker-enabled=false"})
 class OutboxTest {
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore tasks;
     @Autowired TaskLifecycle lifecycle;
     @Autowired ScheduleStore schedules;
@@ -30,17 +32,17 @@ class OutboxTest {
 
     @BeforeEach
     void clean() {
-        tasks.jdbc().update("DELETE FROM forge_outbox");
-        tasks.jdbc().update("DELETE FROM forge_attempt");
-        tasks.jdbc().update("DELETE FROM forge_task");
-        tasks.jdbc().update("DELETE FROM forge_schedule");
+        jdbc.update("DELETE FROM forge_outbox");
+        jdbc.update("DELETE FROM forge_attempt");
+        jdbc.update("DELETE FROM forge_task");
+        jdbc.update("DELETE FROM forge_schedule");
     }
 
     Submission request(Instant availableAt) {
         return new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 3, 1, 30, availableAt);
     }
 
-    int count() { return tasks.jdbc().queryForObject("SELECT COUNT(*) FROM forge_outbox", Integer.class); }
+    int count() { return jdbc.queryForObject("SELECT COUNT(*) FROM forge_outbox", Integer.class); }
 
     @Test
     void submissionAndOutboxCommitAndRollbackTogether() {
@@ -61,8 +63,8 @@ class OutboxTest {
         Task task = tasks.submit(request(Instant.now().plusSeconds(3600)));
         assertThat(count()).isEqualTo(1);
         assertThat(outbox.reserve()).isEmpty();
-        tasks.jdbc().update("UPDATE forge_task SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
-        tasks.jdbc().update("UPDATE forge_outbox SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP), "
+        jdbc.update("UPDATE forge_task SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_outbox SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP), "
                 + "next_attempt_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP)");
         assertThat(outbox.reserve()).isPresent();
     }
@@ -112,18 +114,18 @@ class OutboxTest {
         OutboxStore.Event first = outbox.reserve().orElseThrow();
         outbox.failed(first, "broker unavailable");
         assertThat(outbox.reserve()).isEmpty();
-        tasks.jdbc().update("UPDATE forge_outbox SET next_attempt_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP)");
+        jdbc.update("UPDATE forge_outbox SET next_attempt_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP)");
         OutboxStore.Event second = outbox.reserve().orElseThrow();
         assertThat(second.attempts()).isEqualTo(2);
         assertThat(second.owner()).isNotEqualTo(first.owner());
         outbox.sent(first);
-        assertThat(tasks.jdbc().queryForObject("SELECT sent_at FROM forge_outbox", java.sql.Timestamp.class)).isNull();
-        tasks.jdbc().update("UPDATE forge_outbox SET lease_until=DATEADD('SECOND', -1, CURRENT_TIMESTAMP)");
+        assertThat(jdbc.queryForObject("SELECT sent_at FROM forge_outbox", java.sql.Timestamp.class)).isNull();
+        jdbc.update("UPDATE forge_outbox SET lease_until=DATEADD('SECOND', -1, CURRENT_TIMESTAMP)");
         OutboxStore.Event replacement = outbox.reserve().orElseThrow();
         outbox.failed(second, "late failure");
         outbox.sent(replacement);
         assertThat(outbox.reserve()).isEmpty();
-        assertThat(tasks.jdbc().queryForObject("SELECT attempts FROM forge_outbox", Integer.class)).isEqualTo(3);
+        assertThat(jdbc.queryForObject("SELECT attempts FROM forge_outbox", Integer.class)).isEqualTo(3);
     }
 
     @Test
@@ -132,12 +134,12 @@ class OutboxTest {
         Task first = lifecycle.claim(task.id(), 0, "first").orElseThrow();
         assertThat(lifecycle.finish(first, null, "retry")).isTrue();
         assertThat(count()).isEqualTo(2);
-        tasks.jdbc().update("UPDATE forge_task SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_task SET available_at=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
         Task second = lifecycle.claim(task.id(), first.token(), "second").orElseThrow();
-        tasks.jdbc().update("UPDATE forge_task SET lease_until=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_task SET lease_until=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", task.id());
         assertThat(lifecycle.recoverExpired(100)).isEqualTo(1);
         assertThat(count()).isEqualTo(3);
-        assertThat(tasks.jdbc().queryForList("SELECT expected_token FROM forge_outbox ORDER BY expected_token", Long.class))
+        assertThat(jdbc.queryForList("SELECT expected_token FROM forge_outbox ORDER BY expected_token", Long.class))
                 .containsExactly(0L, first.token(), second.token() + 1);
     }
 
@@ -145,7 +147,7 @@ class OutboxTest {
     void cronInstanceAndNotificationAreCreatedOnce() {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("outbox cron", "*/5 * * * * *", "UTC",
                 new TaskSpec("echo", json.createObjectNode(), 0, 2, 1, 30)));
-        tasks.jdbc().update("UPDATE forge_schedule SET next_run=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", schedule.id());
+        jdbc.update("UPDATE forge_schedule SET next_run=DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id=?", schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         assertThat(schedules.fire(due)).isTrue();
         assertThat(schedules.fire(due)).isFalse();
@@ -155,17 +157,17 @@ class OutboxTest {
     @Test
     void repairRestoresMissingAndOldSentNotificationsWithoutStealingPublishLease() {
         tasks.submit(request(null));
-        tasks.jdbc().update("UPDATE forge_task SET available_at=DATEADD('SECOND', -120, CURRENT_TIMESTAMP)");
+        jdbc.update("UPDATE forge_task SET available_at=DATEADD('SECOND', -120, CURRENT_TIMESTAMP)");
         OutboxStore.Event first = outbox.reserve().orElseThrow();
         ReflectionTestUtils.setField(outbox, "enabled", true);
         try {
             outbox.repair();
             assertThat(outbox.reserve()).isEmpty();
             outbox.sent(first);
-            tasks.jdbc().update("UPDATE forge_outbox SET sent_at=DATEADD('SECOND', -120, CURRENT_TIMESTAMP)");
+            jdbc.update("UPDATE forge_outbox SET sent_at=DATEADD('SECOND', -120, CURRENT_TIMESTAMP)");
             outbox.repair();
             await().atMost(java.time.Duration.ofSeconds(2)).until(() -> outbox.reserve().isPresent());
-            tasks.jdbc().update("DELETE FROM forge_outbox");
+            jdbc.update("DELETE FROM forge_outbox");
             outbox.repair();
             assertThat(count()).isEqualTo(1);
             await().atMost(java.time.Duration.ofSeconds(2)).until(() -> outbox.reserve().isPresent());

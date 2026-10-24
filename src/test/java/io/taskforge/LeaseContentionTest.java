@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -24,6 +25,7 @@ import org.springframework.transaction.support.TransactionTemplate;
         "taskforge.worker-enabled=false"})
 class LeaseContentionTest {
     enum Operation { FINISH, HEARTBEAT, CLAIM }
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired TaskLifecycle lifecycle;
     @Autowired ObjectMapper json;
@@ -32,23 +34,23 @@ class LeaseContentionTest {
     @ParameterizedTest
     @EnumSource(Operation.class)
     void samplesTimeAfterLockWait(Operation operation) throws Exception {
-        checkLockWait(store, lifecycle, json, operation);
+        checkLockWait(store, lifecycle, json, jdbc, operation);
     }
 
     @Test
     void clockAdvancesInsideTransaction() {
-        checkClock(store, tx);
+        checkClock(store, tx, jdbc);
     }
 
-    static void checkClock(TaskStore store, TransactionTemplate tx) {
+    static void checkClock(TaskStore store, TransactionTemplate tx, JdbcTemplate jdbc) {
         tx.executeWithoutResult(status -> {
-            store.jdbc().queryForObject("SELECT CURRENT_TIMESTAMP", java.sql.Timestamp.class);
+            jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", java.sql.Timestamp.class);
             Instant first = store.now();
             await().atMost(Duration.ofSeconds(2)).until(() -> store.now().isAfter(first.plusMillis(100)));
         });
     }
 
-    static void checkLockWait(TaskStore store, TaskLifecycle lifecycle, ObjectMapper json,
+    static void checkLockWait(TaskStore store, TaskLifecycle lifecycle, ObjectMapper json, JdbcTemplate jdbc,
                               Operation operation) throws Exception {
         Task pending = store.submit(new Submission(UUID.randomUUID().toString(), "echo",
                 json.createObjectNode(), 0, 2, 1, 60, null));
@@ -56,21 +58,21 @@ class LeaseContentionTest {
                 : lifecycle.claim(pending.id(), 0, "before-lock").orElseThrow();
         Instant expiry = store.now().plusSeconds(1);
         if (operation != Operation.CLAIM) {
-            store.jdbc().update("UPDATE forge_task SET lease_until=? WHERE id=?", TaskStore.timestamp(expiry), task.id());
+            jdbc.update("UPDATE forge_task SET lease_until=? WHERE id=?", TaskStore.timestamp(expiry), task.id());
         }
         Instant originalLease = store.require(task.id()).leaseUntil();
         var callers = Executors.newSingleThreadExecutor();
         CountDownLatch entered = new CountDownLatch(1);
-        try (Connection lock = store.jdbc().getDataSource().getConnection()) {
+        try (Connection lock = jdbc.getDataSource().getConnection()) {
             lock.setAutoCommit(false);
             try (var statement = lock.prepareStatement("SELECT id FROM forge_task WHERE id=? FOR UPDATE")) {
                 statement.setString(1, task.id());
                 statement.executeQuery().close();
             }
-            var tx = new TransactionTemplate(new DataSourceTransactionManager(store.jdbc().getDataSource()));
+            var tx = new TransactionTemplate(new DataSourceTransactionManager(jdbc.getDataSource()));
             var result = callers.submit(() -> tx.execute(status -> {
                 // Force transaction time to precede the wait on both database engines.
-                store.jdbc().queryForObject("SELECT CURRENT_TIMESTAMP", java.sql.Timestamp.class);
+                jdbc.queryForObject("SELECT CURRENT_TIMESTAMP", java.sql.Timestamp.class);
                 entered.countDown();
                 return switch (operation) {
                     case FINISH -> lifecycle.finish(task, "{}", null);

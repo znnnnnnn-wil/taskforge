@@ -4,7 +4,7 @@
 
 PostgreSQL 保存任务状态、执行记录、调度计划和 Outbox；RabbitMQ 分发已经到期的执行通知。
 任务处理器不直接依赖消息内容执行业务，而是通过数据库验证任务当前状态与执行凭证后领取。
-Java 侧保留 Spring JdbcTemplate 和 TransactionTemplate，消息接入不改变现有事务正确性依据。
+Java 侧使用 MyBatis-Flex Mapper 和 Spring TransactionTemplate，任务与 Outbox 继续共享同一数据库事务。
 
 本地默认 `RABBIT_ENABLED=false`，无需 Broker。Compose 默认开启 RabbitMQ 模式，所有应用节点必须统一模式。
 部署增加 `rabbitmq:4.2.9-management`，使用独立随机用户密码和持久数据卷，端口只在 Compose 内网开放。

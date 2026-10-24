@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -33,6 +34,7 @@ class PostgresTest {
         registry.add("spring.datasource.password", POSTGRES::getPassword);
     }
 
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired TaskLifecycle lifecycle;
     @Autowired ScheduleStore schedules;
@@ -45,7 +47,7 @@ class PostgresTest {
         Task existing = store.submit(request);
         tx.executeWithoutResult(status -> {
             assertThat(store.submit(request).id()).isEqualTo(existing.id());
-            assertThat(store.jdbc().queryForObject("SELECT COUNT(*) FROM forge_outbox WHERE task_id=?",
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM forge_outbox WHERE task_id=?",
                     Integer.class, existing.id())).isEqualTo(1);
             store.submit(new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 1, 1, 30, null));
         });
@@ -54,19 +56,19 @@ class PostgresTest {
     @ParameterizedTest
     @EnumSource(LeaseContentionTest.Operation.class)
     void leaseTimeIsFreshAfterRowLockWait(LeaseContentionTest.Operation operation) throws Exception {
-        LeaseContentionTest.checkLockWait(store, lifecycle, json, operation);
+        LeaseContentionTest.checkLockWait(store, lifecycle, json, jdbc, operation);
     }
 
     @Test
     void databaseClockAdvancesInsideTransaction() {
-        LeaseContentionTest.checkClock(store, tx);
+        LeaseContentionTest.checkClock(store, tx, jdbc);
     }
 
     @Test
     void concurrentEnableAndFirePreserveOneDueInstance() throws Exception {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("PG enable race", "*/5 * * * * *", "UTC",
                 new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
-        store.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+        jdbc.update("UPDATE forge_schedule SET next_run=? WHERE id=?",
                 TaskStore.timestamp(store.now().minusSeconds(60)), schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         var pool = Executors.newFixedThreadPool(8);
@@ -115,7 +117,7 @@ class PostgresTest {
     void schedulerInstancesDoNotMaterializeDuplicateRuns() throws Exception {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("PG trigger", "* * * * * *", "UTC",
                 new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
-        store.jdbc().update("UPDATE forge_schedule SET next_run = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", schedule.id());
+        jdbc.update("UPDATE forge_schedule SET next_run = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         var pool = Executors.newFixedThreadPool(8);
         try {
@@ -132,9 +134,9 @@ class PostgresTest {
     void crashedWorkerLeaseIsRecoveredAndStaleResultRejected() {
         Task task = store.submit(new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 2, 1, 30, null));
         Task old = lifecycle.claim(task.id(), 0, "crashed").orElseThrow();
-        store.jdbc().update("UPDATE forge_task SET lease_until = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", task.id());
+        jdbc.update("UPDATE forge_task SET lease_until = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = ?", task.id());
         assertThat(lifecycle.recoverExpired(100)).isEqualTo(1);
-        store.jdbc().update("UPDATE forge_task SET available_at = CURRENT_TIMESTAMP WHERE id = ?", task.id());
+        jdbc.update("UPDATE forge_task SET available_at = CURRENT_TIMESTAMP WHERE id = ?", task.id());
         Task replacement = lifecycle.claim(task.id(), store.require(task.id()).token(), "replacement").orElseThrow();
         assertThat(lifecycle.finish(old, "{}", null)).isFalse();
         assertThat(lifecycle.finish(replacement, "{}", null)).isTrue();

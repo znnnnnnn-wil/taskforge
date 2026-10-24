@@ -8,12 +8,14 @@ import java.time.Instant;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:store;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
         "taskforge.worker-enabled=false"})
 class StoreTest {
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired ObjectMapper json;
 
@@ -61,7 +63,7 @@ class StoreTest {
         Submission request = new Submission(key, "echo", json.createObjectNode(), 0, 1, 1, 30,
                 Instant.parse("2026-01-01T00:00:00.123456789Z"));
         Task task = store.submit(request);
-        store.jdbc().update("UPDATE forge_task SET available_at = CURRENT_TIMESTAMP, status = 'SUCCEEDED' WHERE id = ?", task.id());
+        jdbc.update("UPDATE forge_task SET available_at = CURRENT_TIMESTAMP, status = 'SUCCEEDED' WHERE id = ?", task.id());
         assertThat(store.submit(request).id()).isEqualTo(task.id());
     }
 }

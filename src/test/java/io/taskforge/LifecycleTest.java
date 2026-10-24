@@ -11,12 +11,14 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:lifecycle;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
         "taskforge.worker-enabled=false"})
 class LifecycleTest {
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired TaskLifecycle lifecycle;
     @Autowired ObjectMapper json;
@@ -50,12 +52,12 @@ class LifecycleTest {
     @Test
     void expiredOwnerCannotRenewOrComplete() {
         Task first = lifecycle.claim(task(3).id(), 0, "dead-node").orElseThrow();
-        store.jdbc().update("UPDATE forge_task SET lease_until = DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id = ?", first.id());
+        jdbc.update("UPDATE forge_task SET lease_until = DATEADD('SECOND', -1, CURRENT_TIMESTAMP) WHERE id = ?", first.id());
         assertThat(lifecycle.heartbeat(first, 10)).isFalse();
         assertThat(lifecycle.finish(first, "{}", null)).isFalse();
         assertThat(lifecycle.recoverExpired(100)).isEqualTo(1);
         // Force the retry due without relying on H2's rounding at the current microsecond.
-        store.jdbc().update("UPDATE forge_task SET available_at = ? WHERE id = ?",
+        jdbc.update("UPDATE forge_task SET available_at = ? WHERE id = ?",
                 TaskStore.timestamp(Instant.now().minusSeconds(1)), first.id());
         Task second = lifecycle.claim(first.id(), store.require(first.id()).token(), "new-node").orElseThrow();
         assertThat(second.token()).isGreaterThan(first.token());
