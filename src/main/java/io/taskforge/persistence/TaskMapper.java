@@ -1,6 +1,7 @@
 package io.taskforge.persistence;
 
 import com.mybatisflex.core.BaseMapper;
+import com.mybatisflex.annotation.UseDataSource;
 import java.util.List;
 import java.util.Map;
 import org.apache.ibatis.annotations.Mapper;
@@ -9,6 +10,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
+@UseDataSource("taskforge")
 public interface TaskMapper extends BaseMapper<TaskRow> {
     @Select("SELECT * FROM forge_task WHERE id = #{id} FOR UPDATE")
     TaskRow lock(@Param("id") String id);
