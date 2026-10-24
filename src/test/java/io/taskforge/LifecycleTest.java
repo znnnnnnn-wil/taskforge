@@ -3,6 +3,7 @@ package io.taskforge;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Optional;
 import java.util.UUID;
@@ -53,7 +54,9 @@ class LifecycleTest {
         assertThat(lifecycle.heartbeat(first, 10)).isFalse();
         assertThat(lifecycle.finish(first, "{}", null)).isFalse();
         assertThat(lifecycle.recoverExpired(100)).isEqualTo(1);
-        store.jdbc().update("UPDATE forge_task SET available_at = CURRENT_TIMESTAMP WHERE id = ?", first.id());
+        // Force the retry due without relying on H2's rounding at the current microsecond.
+        store.jdbc().update("UPDATE forge_task SET available_at = ? WHERE id = ?",
+                TaskStore.timestamp(Instant.now().minusSeconds(1)), first.id());
         Task second = lifecycle.claim(first.id(), store.require(first.id()).token(), "new-node").orElseThrow();
         assertThat(second.token()).isGreaterThan(first.token());
         assertThat(lifecycle.finish(first, "old-result", null)).isFalse();
