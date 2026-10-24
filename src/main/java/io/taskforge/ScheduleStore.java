@@ -2,8 +2,11 @@ package io.taskforge;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import java.sql.ResultSet;
-import java.sql.SQLException;
+import com.mybatisflex.core.query.QueryWrapper;
+import io.taskforge.persistence.ScheduleMapper;
+import io.taskforge.persistence.ScheduleRow;
+import io.taskforge.persistence.TaskMapper;
+import io.taskforge.persistence.TaskRow;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.List;
@@ -13,7 +16,6 @@ import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import static io.taskforge.TaskStore.instant;
 import static io.taskforge.TaskStore.timestamp;
 
 @Service
@@ -23,14 +25,19 @@ public class ScheduleStore {
     private final HandlerRegistry handlers;
     private final TransactionTemplate tx;
     private final ForgeProperties config;
+    private final ScheduleMapper mapper;
+    private final TaskMapper taskMapper;
 
     public ScheduleStore(TaskStore tasks, ObjectMapper json, HandlerRegistry handlers,
-                         TransactionTemplate tx, ForgeProperties config) {
+                         TransactionTemplate tx, ForgeProperties config,
+                         ScheduleMapper mapper, TaskMapper taskMapper) {
         this.tasks = tasks;
         this.json = json;
         this.handlers = handlers;
         this.tx = tx;
         this.config = config;
+        this.mapper = mapper;
+        this.taskMapper = taskMapper;
     }
 
     public TaskSchedule create(ScheduleRequest request) {
@@ -38,11 +45,14 @@ public class ScheduleStore {
         Instant next = next(request.cron(), request.zone(), tasks.now());
         String id = UUID.randomUUID().toString();
         try {
-            tasks.jdbc().update("""
-                    INSERT INTO forge_schedule(id, name, cron, zone, task_json, next_run)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """, id, request.name(), request.cron(), request.zone(),
-                    json.writeValueAsString(request.task()), timestamp(next));
+            var row = new ScheduleRow();
+            row.id = id;
+            row.name = request.name();
+            row.cron = request.cron();
+            row.zone = request.zone();
+            row.taskJson = json.writeValueAsString(request.task());
+            row.nextRun = timestamp(next).toInstant();
+            mapper.insertSelectiveWithPk(row);
         } catch (JsonProcessingException impossible) {
             throw new IllegalStateException(impossible);
         }
@@ -50,31 +60,29 @@ public class ScheduleStore {
     }
 
     public TaskSchedule require(String id) {
-        List<TaskSchedule> found = tasks.jdbc().query("SELECT * FROM forge_schedule WHERE id = ?", this::map, id);
-        if (found.isEmpty()) throw new ForgeException(404, "周期任务不存在");
-        return found.get(0);
+        ScheduleRow row = mapper.selectOneById(id);
+        if (row == null) throw new ForgeException(404, "周期任务不存在");
+        return view(row);
     }
 
     public List<TaskSchedule> list(int limit, int offset) {
         if (limit < 1 || limit > 200 || offset < 0 || offset > 100000) {
             throw new ForgeException(400, "limit 范围 1..200，offset 范围 0..100000");
         }
-        return tasks.jdbc().query("SELECT * FROM forge_schedule ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
-                this::map, limit, offset);
+        return mapper.selectListByQuery(QueryWrapper.create()
+                .orderBy("created_at DESC", "id DESC").limit(offset, limit)).stream().map(this::view).toList();
     }
 
     public TaskSchedule enable(String id, boolean enabled) {
         return tx.execute(status -> {
-            List<TaskSchedule> found = tasks.jdbc().query(
-                    "SELECT * FROM forge_schedule WHERE id = ? FOR UPDATE", this::map, id);
-            if (found.isEmpty()) throw new ForgeException(404, "周期任务不存在");
-            TaskSchedule schedule = found.get(0);
+            ScheduleRow row = mapper.lock(id);
+            if (row == null) throw new ForgeException(404, "周期任务不存在");
+            TaskSchedule schedule = view(row);
             if (schedule.enabled() == enabled) return schedule;
             if (enabled) {
-                tasks.jdbc().update("UPDATE forge_schedule SET enabled = TRUE, next_run = ? WHERE id = ?",
-                        timestamp(next(schedule.cron(), schedule.zone(), tasks.now())), id);
+                mapper.resume(id, timestamp(next(schedule.cron(), schedule.zone(), tasks.now())).toInstant());
             } else {
-                tasks.jdbc().update("UPDATE forge_schedule SET enabled = FALSE WHERE id = ?", id);
+                mapper.pause(id);
             }
             return require(id);
         });
@@ -85,20 +93,16 @@ public class ScheduleStore {
         if (limit < 1 || limit > 200 || offset < 0 || offset > 100000) {
             throw new ForgeException(400, "分页参数超出范围");
         }
-        return tasks.jdbc().query("""
-                SELECT * FROM forge_task WHERE schedule_id = ?
-                ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?
-                """, tasks::map, id, limit, offset);
+        return taskMapper.selectListByQuery(QueryWrapper.create().where("schedule_id = ?", id)
+                .orderBy("created_at DESC", "id DESC").limit(offset, limit)).stream().map(TaskRow::view).toList();
     }
 
     @Scheduled(fixedDelay = 1000)
     public void tick() {
         if (!config.workerEnabled()) return;
-        List<TaskSchedule> due = tasks.jdbc().query("""
-                SELECT * FROM forge_schedule WHERE enabled = TRUE AND next_run <= CURRENT_TIMESTAMP
-                ORDER BY next_run LIMIT 100
-                """, this::map);
-        for (TaskSchedule schedule : due) fire(schedule);
+        List<ScheduleRow> due = mapper.selectListByQuery(QueryWrapper.create()
+                .where("enabled = TRUE AND next_run <= CURRENT_TIMESTAMP").orderBy("next_run").limit(100));
+        for (ScheduleRow row : due) fire(view(row));
     }
 
     public boolean fire(TaskSchedule schedule) {
@@ -106,15 +110,13 @@ public class ScheduleStore {
             Instant now = tasks.now();
             if (schedule.nextRun().isAfter(now)) return false;
             Instant next = next(schedule.cron(), schedule.zone(), now);
-            int changed = tasks.jdbc().update("""
-                    UPDATE forge_schedule SET next_run = ?
-                    WHERE id = ? AND enabled = TRUE AND next_run = ?
-                    """, timestamp(next), schedule.id(), timestamp(schedule.nextRun()));
+            int changed = mapper.advance(schedule.id(), timestamp(schedule.nextRun()).toInstant(),
+                    timestamp(next).toInstant());
             if (changed == 0) return false;
             String id = UUID.randomUUID().toString();
             String key = "schedule:" + schedule.id() + ":" + schedule.nextRun().toEpochMilli();
             tasks.insert(id, schedule.task().submission(key, schedule.nextRun()));
-            tasks.jdbc().update("UPDATE forge_task SET schedule_id = ? WHERE id = ?", schedule.id(), id);
+            taskMapper.assignSchedule(id, schedule.id());
             return true;
         }));
     }
@@ -129,13 +131,13 @@ public class ScheduleStore {
         }
     }
 
-    private TaskSchedule map(ResultSet rs, int row) throws SQLException {
+    private TaskSchedule view(ScheduleRow row) {
         try {
-            return new TaskSchedule(rs.getString("id"), rs.getString("name"), rs.getString("cron"),
-                    rs.getString("zone"), json.readValue(rs.getString("task_json"), TaskSpec.class),
-                    rs.getBoolean("enabled"), instant(rs, "next_run"), instant(rs, "created_at"));
+            return new TaskSchedule(row.id, row.name, row.cron, row.zone,
+                    json.readValue(row.taskJson, TaskSpec.class), Boolean.TRUE.equals(row.enabled),
+                    row.nextRun, row.createdAt);
         } catch (JsonProcessingException corrupt) {
-            throw new SQLException("持久化的周期任务配置损坏", corrupt);
+            throw new IllegalStateException("持久化的周期任务配置损坏", corrupt);
         }
     }
 }
