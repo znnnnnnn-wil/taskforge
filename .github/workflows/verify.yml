@@ -41,6 +41,9 @@ jobs:
           python3 scripts/setup.py
           docker compose up -d --build --wait
           python3 scripts/smoke.py --chaos
+          if [ -f scripts/rabbit_smoke.py ]; then
+            python3 scripts/rabbit_smoke.py --chaos
+          fi
       - name: Container diagnostics
         if: failure() && hashFiles('compose.yml') != ''
         run: docker compose logs --tail 100
