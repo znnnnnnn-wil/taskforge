@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
@@ -14,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
         "taskforge.worker-enabled=false"})
 class ScheduleTest {
     @Autowired ScheduleStore schedules;
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore tasks;
     @Autowired ObjectMapper json;
 
@@ -21,7 +23,7 @@ class ScheduleTest {
     void materializesOnceAndSkipsMissedIntervals() {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("日报", "*/5 * * * * *", "Asia/Shanghai",
                 new TaskSpec("echo", json.createObjectNode(), 0, 3, 1, 60)));
-        tasks.jdbc().update("UPDATE forge_schedule SET next_run = ? WHERE id = ?",
+        jdbc.update("UPDATE forge_schedule SET next_run = ? WHERE id = ?",
                 TaskStore.timestamp(Instant.now().minusSeconds(3600)), schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         assertThat(schedules.fire(due)).isTrue();
@@ -43,7 +45,7 @@ class ScheduleTest {
     void repeatingEnablePreservesDueRun() {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("幂等启用", "*/5 * * * * *", "UTC",
                 new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
-        tasks.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+        jdbc.update("UPDATE forge_schedule SET next_run=? WHERE id=?",
                 TaskStore.timestamp(tasks.now().minusSeconds(60)), schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         assertThat(schedules.enable(schedule.id(), true).nextRun()).isEqualTo(due.nextRun());
@@ -58,7 +60,7 @@ class ScheduleTest {
     void pausePreservesPlanAndResumeSkipsPausedIntervalsOnce() {
         TaskSchedule schedule = schedules.create(new ScheduleRequest("暂停与恢复", "*/5 * * * * *", "UTC",
                 new TaskSpec("echo", json.createObjectNode(), 0, 1, 1, 30)));
-        tasks.jdbc().update("UPDATE forge_schedule SET next_run=? WHERE id=?",
+        jdbc.update("UPDATE forge_schedule SET next_run=? WHERE id=?",
                 TaskStore.timestamp(tasks.now().minusSeconds(60)), schedule.id());
         TaskSchedule due = schedules.require(schedule.id());
         assertThat(schedules.enable(schedule.id(), false).nextRun()).isEqualTo(due.nextRun());

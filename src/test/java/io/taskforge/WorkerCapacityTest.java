@@ -14,12 +14,14 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:capacity;MODE=PostgreSQL;DB_CLOSE_DELAY=-1",
         "taskforge.worker-enabled=false"})
 class WorkerCapacityTest {
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired TaskLifecycle lifecycle;
     @Autowired ObjectMapper json;
@@ -58,7 +60,7 @@ class WorkerCapacityTest {
                 assertThat(store.require(retry.id()).status()).isEqualTo("RETRY");
             });
             // Put the retry unambiguously in the past; H2 may round CURRENT_TIMESTAMP above poll's clock.
-            store.jdbc().update("UPDATE forge_task SET available_at=? WHERE id=?",
+            jdbc.update("UPDATE forge_task SET available_at=? WHERE id=?",
                     TaskStore.timestamp(Instant.now().minusSeconds(1)), retry.id());
             worker.poll();
             assertThat(secondStarted.await(5, TimeUnit.SECONDS)).isTrue();

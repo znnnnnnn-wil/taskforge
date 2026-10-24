@@ -1,6 +1,6 @@
 # TaskForge
 
-一个使用 Java 17、Spring Boot 3.5、JDBC、PostgreSQL 和 RabbitMQ 实现的分布式任务调度与执行平台。
+一个使用 Java 17、Spring Boot 3.5、MyBatis-Flex、PostgreSQL 和 RabbitMQ 实现的分布式任务调度与执行平台。
 业务提交报表计算、内容摘要等任务，平台负责延时执行、周期触发、并发控制、重试和执行记录。
 多节点部署通过事务 Outbox 将到期任务发送到 RabbitMQ，执行节点经数据库校验后领取，
 失联任务在租约过期后可由其他节点接管。本地开发保留无需 RabbitMQ 的数据库轮询模式。

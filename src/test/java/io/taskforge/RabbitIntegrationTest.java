@@ -16,6 +16,7 @@ import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.test.annotation.DirtiesContext;
@@ -55,6 +56,7 @@ class RabbitIntegrationTest {
         registry.add("spring.rabbitmq.password", () -> "integration-only-secret");
     }
 
+    @Autowired JdbcTemplate jdbc;
     @Autowired TaskStore store;
     @Autowired TaskLifecycle lifecycle;
     @Autowired WorkerEngine worker;
@@ -103,7 +105,7 @@ class RabbitIntegrationTest {
     @Test
     void staleNotificationCannotConsumeTheNextRetryGeneration() throws Exception {
         Task task = submit("echo", 2, Instant.now().plusSeconds(3600), 0);
-        store.jdbc().update("UPDATE forge_task SET available_at=CURRENT_TIMESTAMP WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_task SET available_at=CURRENT_TIMESTAMP WHERE id=?", task.id());
         Task first = lifecycle.claim(task.id(), 0, "failed-node").orElseThrow();
         assertThat(lifecycle.finish(first, null, "temporary failure")).isTrue();
         for (int i = 0; i < 12; i++) publish(new DispatchMessage(UUID.randomUUID().toString(), task.id(), 0));
@@ -118,9 +120,9 @@ class RabbitIntegrationTest {
     @Test
     void leaseRecoveryPublishesAnotherGenerationAndRejectsOldResult() {
         Task task = submit("echo", 2, Instant.now().plusSeconds(3600), 0);
-        store.jdbc().update("UPDATE forge_task SET available_at=CURRENT_TIMESTAMP WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_task SET available_at=CURRENT_TIMESTAMP WHERE id=?", task.id());
         Task old = lifecycle.claim(task.id(), 0, "crashed-node").orElseThrow();
-        store.jdbc().update("UPDATE forge_task SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id=?", task.id());
+        jdbc.update("UPDATE forge_task SET lease_until=CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id=?", task.id());
         lifecycle.recoverExpired(100);
         until(task.id(), "SUCCEEDED");
         assertThat(lifecycle.finish(old, "{}", null)).isFalse();
