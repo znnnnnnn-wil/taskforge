@@ -17,6 +17,9 @@ SQL 中的 NULL 显式清除旧 owner、租约、错误和结果，不依赖 ORM
 ## 事务与时钟
 
 Mapper 和 TransactionTemplate 使用同一 DataSource，由 Spring 管理连接、提交和回滚。
+应用显式使用 SpringManagedTransactionFactory 与支持保存点的 JdbcTransactionManager，
+两者和测试 SQL 共享同一个 FlexDataSource；连接池继续由 Hikari 管理。
+各 BaseMapper 绑定命名数据源 `taskforge`，按自己的工厂选择方言，避免 H2/PostgreSQL 上下文串用。
 提交任务采用 NESTED 保存点：重复请求触发唯一约束时，回滚保存点后仍能在外层事务查询原任务。
 任务插入、重试与失联恢复均在更新任务的同一事务中写入 Outbox；Cron 推进与实例创建也共享事务。
 Outbox 发送租约在网络发送前提交，不在数据库事务内等待 RabbitMQ 确认。

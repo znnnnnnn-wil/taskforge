@@ -184,6 +184,7 @@ RabbitMQ 模式使用 0..9 的 classic 优先级队列，已投递或执行中�
 历史任务和执行记录保留在数据库中，尚未自动清理；长期部署需按业务保留周期规划归档。
 详细设计与验证记录见 [架构说明](docs/architecture.md) 和 [验证记录](docs/validation.md)。
 消息分发、故障恢复和运维说明见 [RabbitMQ 设计](docs/rabbitmq.md)。单节点 Broker 和 classic 队列不提供副本高可用。
+数据访问、实体映射与事务缓存配置见 [MyBatis-Flex 说明](docs/persistence.md)。
 
 ## PR 规则
 
