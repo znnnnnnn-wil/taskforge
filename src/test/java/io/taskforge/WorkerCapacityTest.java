@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -56,7 +57,9 @@ class WorkerCapacityTest {
                 worker.maintain();
                 assertThat(store.require(retry.id()).status()).isEqualTo("RETRY");
             });
-            store.jdbc().update("UPDATE forge_task SET available_at=CURRENT_TIMESTAMP WHERE id=?", retry.id());
+            // Put the retry unambiguously in the past; H2 may round CURRENT_TIMESTAMP above poll's clock.
+            store.jdbc().update("UPDATE forge_task SET available_at=? WHERE id=?",
+                    TaskStore.timestamp(Instant.now().minusSeconds(1)), retry.id());
             worker.poll();
             assertThat(secondStarted.await(5, TimeUnit.SECONDS)).isTrue();
             assertThat(worker.activeCount()).isEqualTo(2);

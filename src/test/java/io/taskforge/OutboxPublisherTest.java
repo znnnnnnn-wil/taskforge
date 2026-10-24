@@ -89,4 +89,24 @@ class OutboxPublisherTest {
         verify(outbox).failed(eq(event), contains("TimeoutException"));
         verify(outbox, never()).sent(any());
     }
+
+    @Test
+    void sendsTheBatchBeforeWaitingForIndividualConfirms() {
+        var second = new OutboxStore.Event(new DispatchMessage(UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), 0), 0, "owner-2", 1);
+        when(outbox.reserve()).thenReturn(Optional.of(event), Optional.of(second), Optional.empty());
+        var confirmations = new java.util.ArrayList<CorrelationData>();
+        doAnswer(invocation -> {
+            confirmations.add(invocation.getArgument(3));
+            if (confirmations.size() == 2) confirmations.forEach(c ->
+                    c.getFuture().complete(new CorrelationData.Confirm(true, null)));
+            return null;
+        }).when(rabbit).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+        publisher.publish();
+        var order = inOrder(rabbit, outbox);
+        order.verify(rabbit, times(2)).send(anyString(), anyString(), any(Message.class), any(CorrelationData.class));
+        order.verify(outbox).sent(event);
+        order.verify(outbox).sent(second);
+        verify(outbox, never()).failed(any(), anyString());
+    }
 }
