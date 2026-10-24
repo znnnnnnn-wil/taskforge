@@ -24,9 +24,9 @@ public class RabbitTransport {
     Declarables dispatchTopology() {
         var exchange = new DirectExchange(EXCHANGE, true, false);
         var dead = new DirectExchange(EXCHANGE + ".dead", true, false);
-        var ready = QueueBuilder.durable(QUEUE).maxPriority(9)
+        var ready = QueueBuilder.durable(QUEUE).withArgument("x-queue-type", "classic").maxPriority(9)
                 .deadLetterExchange(dead.getName()).deadLetterRoutingKey("dead").build();
-        var failures = QueueBuilder.durable(DEAD_QUEUE).build();
+        var failures = QueueBuilder.durable(DEAD_QUEUE).withArgument("x-queue-type", "classic").build();
         return new Declarables(exchange, dead, ready, failures,
                 BindingBuilder.bind(ready).to(exchange).with("ready"),
                 BindingBuilder.bind(failures).to(dead).with("dead"));
@@ -38,8 +38,16 @@ public class RabbitTransport {
                                                  ObjectMapper json, MeterRegistry metrics, ForgeProperties config) {
         var listener = new RabbitConsumer(worker, json, metrics);
         var container = new SimpleMessageListenerContainer(connectionFactory) {
-            @Override public void stop() { listener.close(); super.stop(); }
-            @Override public void stop(Runnable callback) { listener.close(); super.stop(callback); }
+            private RabbitConsumer current = listener;
+            @Override public void start() {
+                if (!isRunning()) {
+                    current = new RabbitConsumer(worker, json, metrics);
+                    setMessageListener(current);
+                }
+                super.start();
+            }
+            @Override public void stop() { current.close(); super.stop(); }
+            @Override public void stop(Runnable callback) { current.close(); super.stop(callback); }
         };
         container.setQueueNames(QUEUE);
         container.setAcknowledgeMode(AcknowledgeMode.MANUAL);

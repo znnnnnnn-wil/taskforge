@@ -61,6 +61,7 @@ class RabbitIntegrationTest {
     @Autowired RabbitTemplate rabbit;
     @Autowired ObjectMapper json;
     @Autowired MeterRegistry metrics;
+    @Autowired org.springframework.amqp.rabbit.listener.SimpleMessageListenerContainer deliveries;
 
     @AfterEach
     void cleanup() {
@@ -149,6 +150,18 @@ class RabbitIntegrationTest {
             assertThat(tasks.stream().filter(task -> task.status().equals("RUNNING"))).hasSize(2);
             assertThat(tasks.stream().filter(task -> task.status().equals("PENDING"))).hasSize(4);
         });
+    }
+
+    @Test
+    void stoppedConsumerContainerCanRestartAndCompleteQueuedWork() {
+        deliveries.stop();
+        Task task = submit("echo", 1, null, 0);
+        try {
+            await().during(Duration.ofMillis(300)).atMost(Duration.ofSeconds(2)).untilAsserted(() ->
+                    assertThat(store.require(task.id()).status()).isEqualTo("PENDING"));
+        } finally { deliveries.start(); }
+        until(task.id(), "SUCCEEDED");
+        assertThat(store.attempts(task.id())).hasSize(1);
     }
 
     private Task submit(String handler, int attempts, Instant available, int delay) {
