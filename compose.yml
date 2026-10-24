@@ -6,6 +6,8 @@ x-taskforge: &taskforge
   depends_on:
     db:
       condition: service_healthy
+    rabbitmq:
+      condition: service_healthy
   environment: &environment
     BIND_ADDRESS: 0.0.0.0
     DB_URL: jdbc:postgresql://db:5432/taskforge
@@ -14,6 +16,11 @@ x-taskforge: &taskforge
     TASKFORGE_API_KEY: ${TASKFORGE_API_KEY:?Run python scripts/setup.py first}
     WORKER_CONCURRENCY: 2
     LEASE_SECONDS: 15
+    RABBIT_ENABLED: "true"
+    RABBIT_HOST: rabbitmq
+    RABBIT_PORT: 5672
+    RABBIT_USER: taskforge
+    RABBIT_PASSWORD: ${RABBIT_PASSWORD:?Run python scripts/setup.py first}
   healthcheck:
     test: ["CMD", "bash", "/app/healthcheck.sh"]
     interval: 10s
@@ -22,6 +29,21 @@ x-taskforge: &taskforge
     start_period: 30s
   stop_grace_period: 30s
 services:
+  rabbitmq:
+    image: rabbitmq:4.2.9-management
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: taskforge
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASSWORD:?Run python scripts/setup.py first}
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
   db:
     image: postgres:16
     restart: unless-stopped
@@ -59,3 +81,4 @@ services:
       WORKER_ENABLED: "true"
 volumes:
   postgres-data:
+  rabbit-data:
