@@ -33,6 +33,17 @@ def queue_size():
     return sum(int(row["messages_ready"]) for row in rows if row["name"] == "taskforge.ready")
 
 
+def wait_for_worker_metrics():
+    # The preceding crash test may have restarted a Worker later than the API.
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline:
+        try:
+            return received_count()
+        except (subprocess.CalledProcessError, AssertionError, OSError):
+            time.sleep(0.5)
+    raise AssertionError("Worker metrics did not become ready after restart")
+
+
 def wait_for_queue(minimum):
     deadline = time.monotonic() + 90
     while time.monotonic() < deadline:
@@ -63,10 +74,10 @@ def main():
     prefix = "rabbit-smoke-" + str(uuid.uuid4())
     results = {}
     wait_health()
-    before = received_count()
+    before = wait_for_worker_metrics()
     tasks = batch(prefix + "-normal", args.count)
     complete(tasks)
-    after = received_count()
+    after = wait_for_worker_metrics()
     assert after - before >= args.count, "Tasks did not pass through RabbitMQ consumers"
     results["rabbit_dispatch"] = {"tasks": args.count, "receivedAtLeast": args.count, "attemptsPerTask": 1}
 
