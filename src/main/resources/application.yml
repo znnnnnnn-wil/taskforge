@@ -42,6 +42,12 @@ management:
   endpoint:
     health:
       show-details: never
+mybatis-flex:
+  configuration:
+    map-underscore-to-camel-case: true
+    local-cache-scope: STATEMENT
+    cache-enabled: false
+    jdbc-type-for-null: 'NULL'
 taskforge:
   rabbit:
     enabled: ${RABBIT_ENABLED:false}
