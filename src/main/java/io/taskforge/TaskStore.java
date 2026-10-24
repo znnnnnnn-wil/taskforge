@@ -13,16 +13,23 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.TransactionDefinition;
 
 @Repository
 public class TaskStore {
     final JdbcTemplate jdbc;
     private final ObjectMapper json;
     private final boolean embeddedH2;
+    private final OutboxStore outbox;
+    private final TransactionTemplate tx;
 
-    public TaskStore(JdbcTemplate jdbc, ObjectMapper json) {
+    public TaskStore(JdbcTemplate jdbc, ObjectMapper json, OutboxStore outbox, TransactionTemplate tx) {
         this.jdbc = jdbc;
         this.json = json;
+        this.outbox = outbox;
+        this.tx = new TransactionTemplate(tx.getTransactionManager());
+        this.tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_NESTED);
         this.embeddedH2 = Boolean.TRUE.equals(jdbc.execute((ConnectionCallback<Boolean>) connection -> {
             String database = connection.getMetaData().getDatabaseProductName();
             if (database.equals("H2")) {
@@ -45,7 +52,7 @@ public class TaskStore {
         }
         String id = UUID.randomUUID().toString();
         try {
-            insert(id, request);
+            tx.executeWithoutResult(status -> insert(id, request));
         } catch (DuplicateKeyException duplicate) {
             Task existing = byRequestKey(request.requestKey());
             if (!sameRequest(existing, request)) {
@@ -60,12 +67,15 @@ public class TaskStore {
         jdbc.update("""
                 INSERT INTO forge_task(id, request_key, handler, payload, status, priority,
                   max_attempts, retry_delay_seconds, timeout_seconds, available_at, requested_time)
-                VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)
+                VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)
                 """, id, request.requestKey(), request.handler(), request.payload().toString(),
                 request.priority(), request.maxAttempts(), request.retryDelaySeconds(),
-                request.timeoutSeconds(), timestamp(request.availableAt()),
+                request.timeoutSeconds(), timestamp(request.availableAt() == null ? now() : request.availableAt()),
                 request.availableAt() == null ? null : request.availableAt().toString());
+        outbox.enqueue(require(id));
     }
+
+    void enqueue(Task task) { outbox.enqueue(task); }
 
     public Task require(String id) {
         List<Task> tasks = jdbc.query("SELECT * FROM forge_task WHERE id = ?", this::map, id);
@@ -152,7 +162,7 @@ public class TaskStore {
     }
 
     static Timestamp timestamp(Instant instant) {
-        return instant == null ? null : Timestamp.from(instant);
+        return instant == null ? null : Timestamp.from(instant.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
     }
 
     static Instant instant(ResultSet rs, String name) throws SQLException {

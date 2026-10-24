@@ -77,6 +77,7 @@ public class TaskLifecycle {
                 return false;
             }
             closeAttempt(task, success ? "SUCCEEDED" : "FAILED", now, message);
+            if (next.equals("RETRY")) store.enqueue(store.require(task.id()));
             return true;
         }));
     }
@@ -118,6 +119,7 @@ public class TaskLifecycle {
                         task.id(), task.token(), timestamp(now));
                 if (count == 1) {
                     closeAttempt(task, "LOST", now, "执行租约过期");
+                    if (next.equals("RETRY")) store.enqueue(store.require(task.id()));
                 }
                 return count == 1;
             });
