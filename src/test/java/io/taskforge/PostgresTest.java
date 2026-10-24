@@ -39,6 +39,18 @@ class PostgresTest {
     @Autowired ObjectMapper json;
     @Autowired org.springframework.transaction.support.TransactionTemplate tx;
 
+    @Test
+    void idempotentReplayPreservesOuterTransactionAndOutbox() {
+        var request = new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 1, 1, 30, null);
+        Task existing = store.submit(request);
+        tx.executeWithoutResult(status -> {
+            assertThat(store.submit(request).id()).isEqualTo(existing.id());
+            assertThat(store.jdbc().queryForObject("SELECT COUNT(*) FROM forge_outbox WHERE task_id=?",
+                    Integer.class, existing.id())).isEqualTo(1);
+            store.submit(new Submission(UUID.randomUUID().toString(), "echo", json.createObjectNode(), 0, 1, 1, 30, null));
+        });
+    }
+
     @ParameterizedTest
     @EnumSource(LeaseContentionTest.Operation.class)
     void leaseTimeIsFreshAfterRowLockWait(LeaseContentionTest.Operation operation) throws Exception {
