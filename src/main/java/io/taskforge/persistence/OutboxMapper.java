@@ -1,6 +1,7 @@
 package io.taskforge.persistence;
 
 import com.mybatisflex.core.BaseMapper;
+import com.mybatisflex.annotation.UseDataSource;
 import java.sql.Timestamp;
 import java.util.List;
 import org.apache.ibatis.annotations.Insert;
@@ -11,6 +12,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 @Mapper
+@UseDataSource("taskforge")
 public interface OutboxMapper extends BaseMapper<OutboxRow> {
     @Insert("""
             INSERT INTO forge_outbox(event_id, task_id, expected_token, priority, available_at, next_attempt_at)
