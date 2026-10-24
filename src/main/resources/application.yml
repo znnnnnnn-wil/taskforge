@@ -14,6 +14,17 @@ spring:
   jackson:
     deserialization:
       fail-on-unknown-properties: true
+  rabbitmq:
+    host: ${RABBIT_HOST:127.0.0.1}
+    port: ${RABBIT_PORT:5672}
+    username: ${RABBIT_USER:guest}
+    password: ${RABBIT_PASSWORD:guest}
+    connection-timeout: 3s
+    requested-heartbeat: 10s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
   lifecycle:
     timeout-per-shutdown-phase: 25s
   task:
@@ -21,6 +32,9 @@ spring:
       pool:
         size: 3
 management:
+  health:
+    rabbit:
+      enabled: ${RABBIT_ENABLED:false}
   endpoints:
     web:
       exposure:
@@ -29,6 +43,9 @@ management:
     health:
       show-details: never
 taskforge:
+  rabbit:
+    enabled: ${RABBIT_ENABLED:false}
+    publish-ms: 100
   api-key: ${TASKFORGE_API_KEY:local-development-key}
   worker-enabled: ${WORKER_ENABLED:true}
   node-id: ${NODE_ID:${random.uuid}}

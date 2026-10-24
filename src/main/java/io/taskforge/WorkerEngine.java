@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 @Component
 public class WorkerEngine {
@@ -29,6 +30,8 @@ public class WorkerEngine {
     private final ThreadPoolExecutor pool;
     private final Map<Execution, Active> running = new ConcurrentHashMap<>();
     private volatile boolean closing;
+    @Value("${taskforge.rabbit.enabled:false}")
+    private boolean rabbitEnabled;
 
     public WorkerEngine(TaskStore store, TaskLifecycle lifecycle, HandlerRegistry handlers,
                         ForgeProperties config, ObjectMapper json, MeterRegistry metrics) {
@@ -50,13 +53,20 @@ public class WorkerEngine {
 
     @Scheduled(fixedDelayString = "${taskforge.poll-ms:500}")
     public synchronized void poll() {
-        if (!config.workerEnabled() || closing) return;
+        if (!config.workerEnabled() || closing || rabbitEnabled) return;
         int capacity = config.concurrency() - running.size();
         if (capacity <= 0) return;
         for (Task candidate : store.due(capacity)) {
             if (closing) return;
             lifecycle.claim(candidate.id(), candidate.token(), config.nodeId()).ifPresent(this::dispatch);
         }
+    }
+
+    // A delivery is complete once a durable lease owns execution, including stale duplicates.
+    public synchronized boolean accept(String id, long expectedToken) {
+        if (!config.workerEnabled() || closing || running.size() >= config.concurrency()) return false;
+        lifecycle.claim(id, expectedToken, config.nodeId()).ifPresent(this::dispatch);
+        return true;
     }
 
     private void dispatch(Task task) {
