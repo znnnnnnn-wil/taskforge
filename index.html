@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101318">
+  <meta name="description" content="TaskForge 是开源的分布式任务调度与执行平台，支持延时与 Cron 调度、失败重试、多节点接管和执行追踪。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="TaskForge · 分布式任务调度与执行">
+  <meta property="og:description" content="从定时触发到故障接管，管理后台任务的完整生命周期。">
+  <meta property="og:url" content="https://znnnnnnn-wil.github.io/taskforge/">
+  <link rel="canonical" href="https://znnnnnnn-wil.github.io/taskforge/">
+  <link rel="icon" href="./mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <title>TaskForge · 分布式任务调度与执行</title>
+</head>
+<body>
+  <a class="skip" href="#main">跳到主要内容</a>
+  <header class="shell header">
+    <a class="brand" href="./"><img src="./mark.svg" width="32" height="32" alt="">TaskForge</a>
+    <nav aria-label="主导航">
+      <a href="#architecture">架构</a>
+      <a href="#features">能力</a>
+      <a href="#start">上手</a>
+      <a class="repo-link" href="https://github.com/znnnnnnn-wil/taskforge">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <div class="hero-band">
+      <section class="shell hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="light" aria-hidden="true"></span> 开源任务调度与执行平台</p>
+          <h1 id="hero-title">后台任务，<br><em>按计划运行。</em></h1>
+          <p class="intro">把报表计算、内容处理和周期作业交给 TaskForge。从触发、分发到失败重试和节点接管，任务的每次执行都有记录。</p>
+          <div class="actions">
+            <a class="button primary" href="#start">快速上手 <span aria-hidden="true">↓</span></a>
+            <a class="button secondary" href="https://github.com/znnnnnnn-wil/taskforge">查看源码 <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+        <figure class="trace">
+          <figcaption class="trace-head"><span><span class="light" aria-hidden="true"></span> 执行轨迹</span><span class="demo">示例数据</span></figcaption>
+          <div class="trace-job"><div><span>JOB / REPORT</span><strong>daily-sales-report</strong></div><span class="tag">已完成</span></div>
+          <ol>
+            <li><span class="step">01</span><div><strong>Cron 触发</strong><small>每日 09:00 · Asia/Shanghai</small></div><span class="trace-state">SCHEDULE</span></li>
+            <li><span class="step">02</span><div><strong>任务通知已分发</strong><small>事务 Outbox → RabbitMQ</small></div><span class="trace-state">DISPATCH</span></li>
+            <li><span class="step">03</span><div><strong>执行节点取得租约</strong><small>worker-a · attempt 1</small></div><span class="trace-state">RUNNING</span></li>
+            <li><span class="step">04</span><div><strong>结果已写回</strong><small>可在管理控制台查询</small></div><span class="trace-state final-state">SUCCEEDED</span></li>
+          </ol>
+        </figure>
+      </section>
+    </div>
+    <div class="stack-band">
+      <ul class="shell stack" aria-label="技术栈">
+        <li>Java 17</li><li>Spring Boot 3.5</li><li>MyBatis-Flex</li><li>PostgreSQL</li><li>RabbitMQ</li>
+      </ul>
+    </div>
+    <section id="architecture" class="shell section architecture" aria-labelledby="architecture-title">
+      <div>
+        <p class="eyebrow"><span>01</span> / 执行链路</p>
+        <h2 id="architecture-title">从提交到接管</h2>
+        <p class="section-copy">多节点部署中，PostgreSQL 保存任务、执行记录与租约，RabbitMQ 通知执行节点有新任务可领取。</p>
+        <a class="text-link" href="https://github.com/znnnnnnn-wil/taskforge/blob/main/docs/architecture.md">阅读架构说明 <span aria-hidden="true">↗</span></a>
+      </div>
+      <ol class="pipeline">
+        <li><span>01</span><div><h3>提交与触发</h3><p>通过 API 提交立即或延时任务，也可用六字段 Cron 和 IANA 时区生成周期实例。</p></div></li>
+        <li><span>02</span><div><h3>分发与领取</h3><p>事务 Outbox 保存待发送通知。Worker 收到消息后，按可用执行槽位领取任务。</p></div></li>
+        <li><span>03</span><div><h3>续租与恢复</h3><p>执行节点通过心跳续租。租约到期后，其他节点可接管任务，过期执行凭证无法写回结果。</p></div></li>
+      </ol>
+    </section>
+    <section id="features" class="section feature-band" aria-labelledby="features-title">
+      <div class="shell">
+        <p class="eyebrow"><span>02</span> / 核心能力</p>
+        <h2 id="features-title">把调度细节留给平台</h2>
+        <div class="features">
+          <article><span class="glyph" aria-hidden="true">↻</span><h3>可控重试</h3><p>设置重试上限、指数退避与执行超时，支持按任务发起协作式取消。</p></article>
+          <article><span class="glyph" aria-hidden="true">⇌</span><h3>幂等提交</h3><p>用同一个请求标识和相同参数重试提交，避免重复创建任务。</p></article>
+          <article><span class="glyph" aria-hidden="true">≋</span><h3>执行可追踪</h3><p>从管理控制台查看进度、执行记录和节点状态，通过 Prometheus 采集指标。</p></article>
+        </div>
+        <p class="note"><strong>交付语义</strong>　平台采用至少一次执行。涉及外部副作用时，业务处理器应按业务标识实现幂等。</p>
+      </div>
+    </section>
+    <section id="start" class="shell section start" aria-labelledby="start-title">
+      <div>
+        <p class="eyebrow"><span>03</span> / 快速上手</p>
+        <h2 id="start-title">先跑一个本地节点</h2>
+        <p class="section-copy">准备 Java 17 和 Maven 3.9+。本地开发默认使用 H2 与数据库轮询，适合试跑任务和开发处理器。</p>
+        <a class="text-link" href="https://github.com/znnnnnnn-wil/taskforge#多节点部署">查看 Docker Compose 部署 <span aria-hidden="true">↗</span></a>
+      </div>
+      <div class="terminal">
+        <div class="terminal-head"><span>TERMINAL / 本地开发</span><button id="copy" type="button" hidden>复制命令</button></div>
+        <pre tabindex="0"><code id="commands">git clone https://github.com/znnnnnnn-wil/taskforge.git
+cd taskforge
+mvn spring-boot:run</code></pre>
+        <p class="terminal-foot">启动后访问 <a href="http://127.0.0.1:8080">127.0.0.1:8080</a>，按 <a href="https://github.com/znnnnnnn-wil/taskforge#本地开发">README</a> 进入管理控制台。</p>
+        <span id="copy-status" class="sr-only" role="status"></span>
+      </div>
+    </section>
+  </main>
+  <footer class="footer">
+    <div class="shell footer-inner">
+      <a class="brand" href="./"><img src="./mark.svg" width="28" height="28" alt="">TaskForge</a>
+      <div><a href="https://github.com/znnnnnnn-wil/taskforge/blob/main/LICENSE">MIT 许可证</a><a href="https://github.com/znnnnnnn-wil/taskforge/issues">反馈问题 <span aria-hidden="true">↗</span></a></div>
+    </div>
+  </footer>
+  <script>
+    const copyButton = document.querySelector('#copy');
+    const copyStatus = document.querySelector('#copy-status');
+    let resetCopyLabel;
+    if (navigator.clipboard) {
+      copyButton.hidden = false;
+      copyButton.addEventListener('click', async () => {
+        clearTimeout(resetCopyLabel);
+        try {
+          await navigator.clipboard.writeText(document.querySelector('#commands').textContent);
+          copyButton.textContent = '已复制';
+          copyStatus.textContent = '启动命令已复制。';
+        } catch {
+          copyButton.textContent = '请手动复制';
+          copyStatus.textContent = '无法访问剪贴板，请选择命令文本后手动复制。';
+        }
+        resetCopyLabel = setTimeout(() => { copyButton.textContent = '复制命令'; }, 2400);
+      });
+    }
+  </script>
+</body>
+</html>
